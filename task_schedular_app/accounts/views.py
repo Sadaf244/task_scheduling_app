@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.tokens import RefreshToken
-
+import requests
 
 class CreateAccount(APIView):
     permission_classes = (AllowAny,)
@@ -48,3 +48,44 @@ class Login(APIView):
                 'username': user.username
             }
         }, status=status.HTTP_200_OK)
+
+
+class GoogleLogin(APIView):
+    def post(self, request):
+        access_token = request.data.get('access_token')
+        if not access_token:
+            return Response({'error': 'Access token required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Verify token with Google
+        google_response = requests.get(
+            'https://www.googleapis.com/oauth2/v3/userinfo',
+            params={'access_token': access_token}
+        )
+
+        if not google_response.ok:
+            return Response({'error': 'Invalid Google token'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        google_data = google_response.json()
+
+        # Get or create user
+        user, created = CustomUser.objects.get_or_create(
+            email=google_data['email'],
+            defaults={
+                'username': google_data.get('email'),
+                'first_name': google_data.get('given_name', ''),
+                'last_name': google_data.get('family_name', ''),
+            }
+        )
+
+        # Generate JWT tokens
+        from rest_framework_simplejwt.tokens import RefreshToken
+        refresh = RefreshToken.for_user(user)
+
+        return Response({
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
+            'user': {
+                'email': user.email,
+                'username': user.username,
+            }
+        })
